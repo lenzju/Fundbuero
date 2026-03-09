@@ -1,7 +1,6 @@
-streamlit>=1.38.0
-tensorflow>=2.15.0          
-numpy
-Pillow                     
-opencv-python-headless
+streamlit
 supabase
-st-supabase-connection
+tensorflow-cpu==2.12.0
+pillow
+numpy
+h5py==3.8.0
