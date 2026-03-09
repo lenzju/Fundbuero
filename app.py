@@ -1,91 +1,89 @@
 import streamlit as st
-from supabase_config import supabase
-from ml_model import predict_category
 from PIL import Image
+import numpy as np
+import tensorflow as tf
+from supabase import create_client
 import uuid
 import io
 from datetime import datetime
 
-st.set_page_config(page_title="Digitale Fundkiste")
+# Supabase Verbindung
+SUPABASE_URL = "DEINE_SUPABASE_URL"
+SUPABASE_KEY = "DEIN_SUPABASE_ANON_KEY"
 
-st.title("📦 Digitale Fundkiste")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-page = st.radio("Navigation", ["Start", "Eintrag erstellen", "Suchen"])
+# Modell laden
+model = tf.keras.models.load_model("keras_model.h5")
 
-# START
+# Labels laden
+def load_labels():
+    labels = []
+    with open("labels.txt", "r") as f:
+        for line in f:
+            label = line.strip().split(" ", 1)[1]
+            labels.append(label)
+    return labels
 
-if page == "Start":
+labels = load_labels()
 
-    st.write("Willkommen bei der digitalen Fundkiste.")
+st.title("Fundbüro")
 
-# EINTRAG
+uploaded_file = st.file_uploader("Bild hochladen", type=["jpg","jpeg","png"])
 
-elif page == "Eintrag erstellen":
+beschreibung = st.text_input("Beschreibung")
 
-    typ = st.selectbox("Typ", ["gefunden", "gesucht"])
+typ = st.selectbox("Typ", ["Fund", "Verlust"])
 
-    uploaded_file = st.file_uploader("Bild hochladen", type=["jpg","jpeg","png"])
+if uploaded_file:
 
-    beschreibung = st.text_area("Beschreibung")
+    image = Image.open(uploaded_file)
 
-    kategorie = "Sonstiges"
+    st.image(image, caption="Hochgeladenes Bild", width=300)
 
-    if uploaded_file:
+    # Bild für Modell vorbereiten
+    img = image.resize((224,224))
+    img_array = np.array(img)
+    img_array = img_array / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
 
-        image = Image.open(uploaded_file)
+    prediction = model.predict(img_array)
 
-        st.image(image)
+    class_index = np.argmax(prediction)
 
-        try:
-            kategorie = predict_category(image)
-            st.success(f"Kategorie: {kategorie}")
-        except:
-            pass
+    kategorie = labels[class_index]
+
+    st.write("Erkannte Kategorie:", kategorie)
 
     if st.button("Speichern"):
 
-        if uploaded_file is None:
-            st.error("Bitte Bild hochladen")
-            st.stop()
+        try:
 
-        filename = f"{uuid.uuid4()}.jpg"
+            filename = f"{uuid.uuid4()}.jpg"
 
-        image_bytes = io.BytesIO()
-        image.save(image_bytes, format="JPEG")
+            image_bytes = io.BytesIO()
+            image.save(image_bytes, format="JPEG")
 
-        supabase.storage.from_("images").upload(
-            filename,
-            image_bytes.getvalue(),
-            {"content-type":"image/jpeg"}
-        )
+            supabase.storage.from_("images").upload(
+                path=filename,
+                file=image_bytes.getvalue(),
+                file_options={"content-type": "image/jpeg"}
+            )
 
-        public_url = supabase.storage.from_("images").get_public_url(filename)
+            public_url = supabase.storage.from_("images").get_public_url(filename)
 
-        supabase.table("fundkiste").insert({
-            "bild_url": public_url,
-            "kategorie": kategorie,
-            "beschreibung": beschreibung,
-            "typ": typ,
-            "datum": datetime.now().strftime("%d.%m.%Y")
-        }).execute()
+            supabase.table("fundbuero").insert({
+                "bild_url": public_url,
+                "kategorie": kategorie,
+                "beschreibung": beschreibung,
+                "typ": typ,
+                "datum": datetime.now().strftime("%d.%m.%Y")
+            }).execute()
 
-        st.success("Eintrag gespeichert!")
+            st.success("Upload erfolgreich!")
 
-# SUCHEN
+        except Exception as e:
 
-elif page == "Suchen":
-
-    filter_typ = st.selectbox("Typ", ["gefunden","gesucht"])
-
-    data = supabase.table("fundkiste").select("*").execute()
-
-    for eintrag in data.data:
-
-        if eintrag["typ"] != filter_typ:
-            continue
-
-        st.image(eintrag["bild_url"], width=200)
-
-        st.write(eintrag["kategorie"])
+            st.error(f"Fehler: {e}")     st.write(eintrag["kategorie"])
         st.write(eintrag["beschreibung"])
         st.write(eintrag["datum"])
